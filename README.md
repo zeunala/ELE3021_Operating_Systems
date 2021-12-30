@@ -175,7 +175,6 @@ setpriority함수는 pid와 priority값을 받아 지정한 프로세스의 prio
 monopolize함수는 암호(2017029661)를 입력받아 암호가 맞다면 스케줄러의 최우선순위를 가지게 된다. queueLevel2의 값을 100을 더하는 것으로 최우선 순위의 큐에 넣어주는 효과를 가진다. 만약 이미 queueLevel2의 값이 100 이상이면 이미 monopolize상태인 것이므로 L0큐/priority 0으로 초기화해준다. 만약 입력받은 암호가 틀렸다면 현재 프로세스를 kill하고 yield로 다른 프로세스를 부르도록 한다.
 ![58](https://user-images.githubusercontent.com/79515820/147749090-97248f8a-2800-4c0d-961f-88a2dccc5a74.png)
 각각의 함수는 MLFQ_SCHED가 아닌 경우 단순히 0을 리턴하거나 아무것도 안 하는 함수가 된다.
-
 5. 또한 정의한 함수를 systemcall로 만들고 유저프로그램에서 이용할 수 있도록 코드를 추가해야 한다. 다음과 같이 wrapper function을 추가하고 defs.h, syscall.h, syscall.c, user.h, usys.S에 다음의 코드를 추가해 주어 system call로 만들고 유저프로그램에서도 이용할 수 있게 한다. (실습시간에 배웠던 방법과 동일한 방법으로 진행하였으며, 다만 인자가 int형인 경우 argint를 이용하여 인자를 받아 함수를 호출하도록 하였다)
 ![59](https://user-images.githubusercontent.com/79515820/147749091-4fd7e461-e220-472c-aff5-df43ee25ca3d.png)
 ![60](https://user-images.githubusercontent.com/79515820/147749093-6802a547-e0f1-488c-b083-66155eb45d0c.png)
@@ -189,8 +188,40 @@ monopolize함수는 암호(2017029661)를 입력받아 암호가 맞다면 스�
 
 ### Project 2-3 실행결과
 - 앞에서와 같은 방법으로 xv6를 실행해서 p2_mlfq_test 파일을 실행한 결과 다음과 같이 결과가나온 것을 확인할 수 있다. 각 프로세스가 test1에서는 20000번, test2에서는 50000번, test3에서는 10000번, test4에서는 25000번 반복문을 돌며 L0큐에 있으면 cnt[0], L1큐에 있으면 cnt[1]값을 올리며 이 둘의 값을 합치면 정상적으로 제대로 count가 된 것을 확인할 수 있다. test4의 경우 마지막 프로세스가 monopolize 되기 때문에 L0큐에서 25000번의 연산을 모두 하였고, 끝난 것도 가장 먼저 끝난 것을 확인할 수 있다.
+![68](https://user-images.githubusercontent.com/79515820/147762936-24aed968-c699-4d13-b9a2-97f72b2a95ca.png)
 
 ## Project 3
 
 ### 목표
 * (Project 3) 기존 xv6의 inode에서 한 번의 indirect를 지원했던 것에서 확장하여, 더 큰 파일을 다룰 수 있도록 double indirect를 구현한다.
+
+### Project 3 사전작업
+- 아래에서 double indirect를 구현한 것 이외에도 테스트 프로그램을 정상적으로 실행할 수 있도록 Makefile에 추가해주었다.
+![69](https://user-images.githubusercontent.com/79515820/147762894-54c3d6d9-317b-441d-ab17-846348f6e3eb.png)
+
+### Project 3 디자인
+- 이번엔 프로젝트에서는 기존의 xv6 시스템인 direct+single indirect 구조에서 확장하여 double indirect를 구현하는 것이 목표이다. 기존 inode에서는 끝에 addr1~addr12이 direct로, addr13이 single indirect로 구성되어 있으며, addr13은 다시 addr1~addr128의 테이블을 가리키는 구조로 되어있었다. 여기에서 direct로 할당된 addr12를 single indirect로 바꿔주고, 마지막 addr13을 double indirect로 바꿔서 총 3번 접근을 통해 data에 접근할 수 있도록 구조를 바꿔줘야 한다.
+- 주로 수정해야 할 함수는 fs.c의 bmap함수로, 인자로 받은 inode상의 bn번째 데이터블록을 가져오는 함수인 bmap함수만 올바르게 지정하도록 수정한다면 나머지 함수는 수정하지 않아도 알아서 double indirect에 맞도록 전체적인 구조가 변경될 것이다. 그 외 데이터 블록을 deallocate하는 함수인 itrunc함수도 double indirect 블록이 있을 때 그에 맞게 deallocate하도록 코드를 추가할 필요가 있으며, 이 때 가장 안쪽의 indirect block부터 차례대로 초기화해줘야 한다. 마지막으로 fs.h, param.h와 inode, dinode 구조체에서 수정사항에 맞춰 상수값을 일부 바꿔주면 된다.
+
+### Project 3 구현
+1. 이번에 구현하는 내용에서는 DIRECT 12개+SINGLE INDIRECT 1개 구조에서 DIRECT 11개+SINGLE INDIRECT 1개+DOUBLE INDIRECT 1개 구조로 수정된다. 따라서 fs.h에서 NDIRECT값을 12에서 11로 바꿔주어 11번째부터 SINGLE INDIRECT로 지정한다. 또한 MAXFILE값도 변경되는데, 기존에는 DIRECT 12개+SINGLE INDIRECT에서 128개(BSIZE/sizeof(uint))의 데이터를 가리켰으나, 여기에 DOUBLE INDIRECT에서 추가로 128*128개의 데이터를 가리키게 되므로 NINDIRECT*NINDIRECT값을 추가로 더해줘야 한다.
+![70](https://user-images.githubusercontent.com/79515820/147762895-467778c8-cc88-4ece-a369-2de59db7c092.png)
+2. 또한 param.h에서 double indirect를 구현해준 것과 맞춰 더 큰 파일 사이즈를 가질 수 있도록 FSSIZE값을 20000으로 늘려주었다.
+![71](https://user-images.githubusercontent.com/79515820/147762897-6ab2181e-0fd7-4f87-9794-55968b8a4442.png)
+3. 우선 fs.c의 bmap함수에서 Double indirect를 구현하도록 내용을 추가해주어야 한다. 기존에는 bn값이 NDIRECT+NINDIRECT 이상인 경우 if문에 전부 걸리지 않고 panic을 호출하게 되어있었다. 여기에서 panic으로 가기전에 bn값에서 NINDIRECT를 빼주고(single indirect처리 직전에 bn에서 NDIRECT를 빼준 것과 같은 이유), bn이 NINDIRECT*NINDIRECT보다 작게 되면, 즉 double indirect로 감당이 가능한 bn값인 경우 double indirect로 처리하는 코드를 다음과 같이 추가하게 된다. (추가하는 코드에서 필요한 변수를 line 377-378에 추가하고, line 400-426에 double indirect에 대한 코드를 추가하였다.
+![72](https://user-images.githubusercontent.com/79515820/147762899-60ccb0da-b38c-4e17-910f-fbee6cae68c2.png)
+![73](https://user-images.githubusercontent.com/79515820/147762901-f07fddd9-375c-4492-a1aa-17e242705af1.png)
+![74](https://user-images.githubusercontent.com/79515820/147762902-872c0234-4227-4027-b792-5836eb2e1b49.png)
+기본적인 구조는 기존에 있던 single indirect 코드에서 확장한 형태이다. 우선 data를 가리키는 addr들을 담고 있는 inner table를 먼저 찾아야 하는데, 이는 line 404-line 414에 구현하였으며 기존 single indirect(line 389-397)부분과 거의 유사한 것을 확인할 수 있다. 차이점은 single indirect의 다음 addr에서 시작한다는 점과 bn/NINDIRECT번째의 inner table을 찾아야 하기 때문에 a인덱스로 해당값이 들어간다는 점이다. (double indirect만 생각했을 때, inner table의 addr1-addr128이 outer table의 addr1에 들어있고, adr129-adr256이 outer table의 addr2에 들어있는 구조이기 때문이다)
+그렇게 해서 addr를 찾고 그 정보를 bp2와 a2에 담으면(line 416-417), 여기에는 우리가 찾고자 하는 data의 addr를 담고 있는 inner table의 정보가 들어있게 된다. 여기에서 방금 했던 작업을 다시 한번 반복해서 bn/NINDIRECT번째의 inner table에서 bn%NINDIRECT번째의 entry를 찾아 데이터블록을 가져오게 하면 된다(line 419-425).
+4. 다음으로 fs.c의 itrunc함수에서 double indirect 블록이 있을 때 그에 맞게 deallocate하도록 코드를 추가해야 한다. 우선 추가하는 코드에서 필요한 변수를 line 442-443에 추가하였다.
+![75](https://user-images.githubusercontent.com/79515820/147762904-b66b2686-0554-4e13-a966-00a458778704.png)
+기존 single indirect에서는 single indirect의 데이터블록이 있을 경우 이중 루프를 통해서 indirect가 가리키는 데이터 블록들을 먼저 deallocate해주고, 마지막으로 indirect block을 deallocate해주었다. 같은 방식으로 double indirect에서는 삼중 루프를 통해서 inner table->outer table->double indirect block 순으로 deallocate를 해주었다.
+![76](https://user-images.githubusercontent.com/79515820/147762905-a2e04122-da58-41c3-9c82-92bc5e008204.png)
+5. 마지막으로 변경한 구조에 맞춰 inode, dinode 구조체에 변경사항을 반영해야 한다. 기존 inode, dinode에서는 addrs를 NDIRECT+1개 할당하였으나(direct+single indirect), double indirect를 구현하는 과정에서 NDIRECT값을 하나 빼고 double indirect를 하나 추가하였다. 따라서 addrs배열의 원소를 NDIRECT+2로 수정해야 한다(direct+single indirect+double indirect). inode 구조체는 file.h에, dinode 구조체는 fs.h에 있다는 것을 확인하였고 addrs 배열의 길이만 다음과 같이 수정하였다.
+![77](https://user-images.githubusercontent.com/79515820/147762906-ea891953-6ccf-45d6-a5f8-30897846db39.png)
+![78](https://user-images.githubusercontent.com/79515820/147762908-cf59094b-13bb-46fc-93ac-fc53fcc7076f.png)
+
+### Project 3 실행결과
+- 파일을 모두 위와 같이 변경한 이후 make -> make fs.img -> ./bootxv6.sh 순으로 컴파일을 진행하고(실습강의에서 제공한 bootxv6.sh파일 사용) xv6에서 file_test 파일을 실행한 결과 정상적으로 나오는 것을 확인할 수 있었다. double indirect를 구현하기 전에 실행했을 때는 파일크기가 너무 커서 정상적으로 진행되지 않고 프로그램이 종료되었으나, double indirect를 구현한 후 실행했더니 다음과 같이 파일을 쓰고 읽는 것을 확인할 수 있었다.
+![79](https://user-images.githubusercontent.com/79515820/147762889-fae08123-8595-4a24-8f83-a4d235875af9.png)
